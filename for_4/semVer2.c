@@ -7,30 +7,35 @@
 #include <fcntl.h>
 #include <time.h>
 
-const int NUM_BOLTUNS = 5;   // Change boltuns number here
-const int MAX_WAIT_TIME = 5; // Change waiting time for call in seconds here
+// Change boltuns number here
+#define NUM_BOLTUNS 5
+// Change waiting time for call in seconds here
+#define MAX_WAIT_TIME 5
 
 typedef struct
 {
     int phone_numbers[NUM_BOLTUNS];
     int phone_statuses[NUM_BOLTUNS];
     sem_t sem_lock;
-} shared_data;
+} div_data;
 
-void make_call(int id, shared_data *data);
-void wait_for_call(int id, shared_data *data);
-void switch_state(int id, shared_data *data);
-int get_random_phone_number(int id, shared_data *data);
+void make_call(int id, div_data *data);
+void wait_for_call(int id, div_data *data);
+void switch_state(int id, div_data *data);
+int get_random_phone_number(int id, div_data *data);
 int get_random_wait_time();
+
 // Service function for destroying semaphores in all cases
-void clean_up(int fd, shared_data *data);
+void clean_up(int fd, div_data *data);
 
 int main()
 {
+    // Checking if in all cases clean up of memory and sems will be done
+    atexit(clean_up);
 
-    int fd = shm_open("/shared_memory", O_CREAT | O_RDWR, 0666);
-    ftruncate(fd, sizeof(shared_data));
-    shared_data *data = mmap(NULL, sizeof(shared_data), PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+    int fd = shm_open("/memory", O_CREAT | O_RDWR, 0666);
+    ftruncate(fd, sizeof(div_data));
+    div_data *data = mmap(NULL, sizeof(div_data), PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
     // Initialize shared data
     for (int i = 0; i < NUM_BOLTUNS; i++)
     {
@@ -70,11 +75,16 @@ int main()
         waitpid(pids[i], NULL, 0);
     }
 
-    atexit(clean_up);
+    munmap(data, sizeof(div_data));
+    close(fd);
+    shm_unlink("/memory");
+    sem_destroy(&data->sem_lock);
+    sem_unlink("/sem_lock");
+
     return 0;
 }
 
-void make_call(int id, shared_data *data)
+void make_call(int id, div_data *data)
 {
     int phone_number = get_random_phone_number(id, data);
     sem_wait(&data->sem_lock);
@@ -87,7 +97,7 @@ void make_call(int id, shared_data *data)
     switch_state(id, data);
 }
 
-void wait_for_call(int id, shared_data *data)
+void wait_for_call(int id, div_data *data)
 {
     sem_wait(&data->sem_lock);
     int phone_number = -1;
@@ -109,14 +119,14 @@ void wait_for_call(int id, shared_data *data)
     }
 }
 
-void switch_state(int id, shared_data *data)
+void switch_state(int id, div_data *data)
 {
     sem_wait(&data->sem_lock);
     data->phone_statuses[id] = 0;
     sem_post(&data->sem_lock);
 }
 
-int get_random_phone_number(int id, shared_data *data)
+int get_random_phone_number(int id, div_data *data)
 {
     int phone_number;
     do
@@ -131,11 +141,12 @@ int get_random_wait_time()
     return rand() % MAX_WAIT_TIME + 1;
 }
 
-void clean_up(int fd, shared_data *data)
+void clean_up(int fd, div_data *data)
 {
-    munmap(data, sizeof(shared_data));
+    printf("Clean up function is called\n");
+    munmap(data, sizeof(div_data));
     close(fd);
-    shm_unlink("/shared_memory");
+    shm_unlink("/memory");
     sem_destroy(&data->sem_lock);
     sem_unlink("/sem_lock");
 }
